@@ -1,0 +1,17 @@
+# Carpetas innecesarias
+data/eeg_clean/*
+data/MNE/*
+data/original_data/*
+.idea/
+.venv/
+
+# Mantener placeholders
+!data/eeg_clean/.gitkeep
+!data/MNE/.gitkeep
+!data/original_data/.gitkeep
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.env
