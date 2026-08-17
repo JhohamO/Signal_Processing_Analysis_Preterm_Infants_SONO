@@ -47,7 +47,7 @@ def limpieza_eeg(filepath):
 
     #Registro de las decisiones tomandas durante la limpieza
     cleaning_log = {}
-REVISAR SI ESTO ES CORRECTO
+
     #Seleccionar la referencia según la inspección visual
     print("\n ¿Cómo referenciar?")
     print("1: Promedio de A1 y A2 como referencia")
@@ -100,7 +100,7 @@ REVISAR SI ESTO ES CORRECTO
 
     #Plotear la correlación
     fig_emg = ica.plot_scores(emg_correlations, show=False)
-    fig_emg.canvas.manager.set_window_title("EMG scores")
+    fig_emg.canvas.manager.set_window_title("EMG correlations")
 
 
     #EOG and ECG scores
@@ -111,8 +111,6 @@ REVISAR SI ESTO ES CORRECTO
     cleaning_log["eog_scores_LOC"] = list(eog_scores[1])
     cleaning_log["ecg_scores"] = list(ecg_scores)
     cleaning_log["emg_correlations"] = list(emg_correlations)
-
-
 
     #Plot scores
     fig_eog = ica.plot_scores(eog_scores, show=False)
@@ -130,11 +128,11 @@ REVISAR SI ESTO ES CORRECTO
 
     #Plotear sources en caso de considerarse necesario
     print("\n ¿Plotear sources?")
-    print("y: Sí")
-    print("n: No")
+    print("1: Sí")
+    print("2: No")
     plot_sources = input("¿Plotear?")
 
-    if plot_sources == "y":
+    if plot_sources == "1":
         fig_sources = ica.plot_sources(raw_filtered, show=False)
         fig_sources.canvas.manager.set_window_title("Sources plot")
         plt.show(block=True)
@@ -195,8 +193,12 @@ for file in DATA_MNE.glob("*.fif"):
     cleaning_logs[file.stem[:-3]] = cleaning_log
 
     # Guardar el raw después de la limpieza
-    output_path = DATA_EEG_CLEAN / f"{file.stem[:-3]}_clean_eeg.fif"
+    output_path = DATA_EEG_CLEAN / f"{file.stem.removesuffix("_raw")}_clean_eeg.fif"
     raw_limpio.save(output_path, overwrite=True)
+
+    #Un break para para probar con un único sujeto
+    break
+
 
 
 
