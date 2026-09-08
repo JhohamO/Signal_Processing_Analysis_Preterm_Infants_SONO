@@ -2,8 +2,13 @@
 data/eeg_clean/*
 data/MNE/*
 data/original_data/*
+data/results/*
 .idea/
 .venv/
+data/info_marcadores.xlsx
+data/aleatorizacion_hipotermia.xlsx
+data/Problemas_con_marcadores.txt
+scripts/info_marcas_arreglar.xlsx
 
 # Mantener placeholders
 !data/eeg_clean/.gitkeep

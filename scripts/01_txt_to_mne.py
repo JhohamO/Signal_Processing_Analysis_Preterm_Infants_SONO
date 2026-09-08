@@ -5,6 +5,7 @@ import re
 import matplotlib.pyplot as plt
 import matplotlib
 import mne
+from extract_markers import cargar_txt
 
 #Definir la ruta de trabajo
 ROOT= Path(__file__).resolve().parent.parent

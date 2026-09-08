@@ -2,6 +2,7 @@ import mne
 import numpy as np
 from pathlib import Path
 import matplotlib.pyplot as plt
+import json
 
 #Defino las rutas de los archivos
 ROOT = Path(__file__).resolve().parent.parent
@@ -35,6 +36,7 @@ def load_fif(filepath):
     fig = raw.plot(show=False)
     fig.canvas.manager.set_window_title("EEG RAW-Revisar referencias")
     plt.show(block=True)
+    plt.close(fig)
 
     return raw
 
@@ -83,6 +85,7 @@ def filtering_rereference(raw, l_freq, h_freq):
     fig = raw_filtered.plot(show=False)
     fig.canvas.manager.set_window_title("Post filtrado")
     plt.show(block=True)
+    plt.close(fig)
 
     # A1/A2 se usan únicamente como canales de referencia del EEG. Removidos después de rereferenciar
     raw_filtered.drop_channels(["A1", "A2"])
@@ -139,11 +142,15 @@ def remove_ica_artifacts(raw, raw_filtered):
     fig_ecg.canvas.manager.set_window_title("ECG scores")
 
     plt.show(block=True)
+    plt.close(fig_emg)
+    plt.close(fig_eog)
+    plt.close(fig_ecg)
 
     # Ver componentes
     fig_ica_components = ica.plot_components(inst=raw_filtered, show=False)
     fig_ica_components.canvas.manager.set_window_title("ICA components")
     plt.show(block=True)
+    plt.close(fig_ica_components)
 
     # Plotear sources en caso de considerarse necesario
     print("\n ¿Plotear sources?")
@@ -155,6 +162,7 @@ def remove_ica_artifacts(raw, raw_filtered):
         fig_sources = ica.plot_sources(raw_filtered, show=False)
         fig_sources.canvas.manager.set_window_title("Sources plot")
         plt.show(block=True)
+        plt.close(fig_sources)
 
     # Plotear overlay para ver qué tanta información remueve el componente (en caso de ser necesario)
     print("\n Seleccione los componentes que planea plotear. En caso de que no lo desee deje vacía la entrada")
@@ -170,6 +178,7 @@ def remove_ica_artifacts(raw, raw_filtered):
         fig_overlay = ica.plot_overlay(raw_filtered, exclude=[comp], show=False)
         fig_overlay.canvas.manager.set_window_title("Componente {} plot".format(comp))
         plt.show(block=True)
+        plt.close(fig_overlay)
 
     # Componentes a remover
     print("\n Selecciobes los components a remover. En caso de que no lo desee deje vacía la entrada")
@@ -211,6 +220,7 @@ def limpieza_eeg(filepath, l_freq=0.1, h_freq=40):
     fig_limpieza = raw_filtered_ica.plot(show=False)
     fig_limpieza.canvas.manager.set_window_title("Realizar limpieza manual de artefactos sobrevivientes")
     plt.show(block=True)
+    plt.close(fig_limpieza)
 
     #Comentarios sobre la limpieza
     comentarios = input("Comente sobre las decisiones tomandas durante la limpieza")
@@ -220,26 +230,49 @@ def limpieza_eeg(filepath, l_freq=0.1, h_freq=40):
 
 
 #Crear el diccionario donde se guardaran los comentarios de cada archivo
-cleaning_logs = {}
+cleaning_log_path = DATA_EEG_CLEAN / "cleaning_logs.json"
+
+#Si ya hay sujetos limpios, carga el cleaning log
+if cleaning_log_path.exists():
+    with open(cleaning_log_path, 'r', encoding='utf-8') as f:
+        cleaning_logs = json.load(f)
+#Si no, lo crea de cero
+else:
+    cleaning_logs = {}
 
 #Crear el directorio de salida
 DATA_EEG_CLEAN.mkdir(parents=True, exist_ok=True)
 
-#Recorrer los archivos
-for file in DATA_MNE.glob("*.fif"):
+#Archivos a recorrer
+files = sorted(DATA_MNE.glob("*.fif"))
 
-    #Aplicar la función
+for file in files:
+
+    #Sujeto y ruta de salida
+    subject_id = file.stem.removesuffix("_raw")
+    output_path = DATA_EEG_CLEAN / f"{subject_id}_clean_eeg.fif"
+
+    #Si ya se procesó, saltarlo
+    if output_path.exists():
+        print(f"Skipping {subject_id}: already processed.")
+        continue
+
+    #Si no, entra al proceso de limpieza
     raw_limpio, cleaning_log = limpieza_eeg(file)
 
-    #Guardar el comentario
-    cleaning_logs[file.stem.removesuffix("_raw")] = cleaning_log
+    #Se actualiza el cleaning log
+    cleaning_logs[subject_id] = cleaning_log
 
-    # Guardar el raw después de la limpieza
-    output_path = DATA_EEG_CLEAN / f"{file.stem.removesuffix("_raw")}_clean_eeg.fif"
+    #Guardar el raw
     raw_limpio.save(output_path, overwrite=True)
 
-    #Un break para para probar con un único sujeto
-    break
+    #Guardar el cleaning log
+    with open(
+        DATA_EEG_CLEAN / "cleaning_logs.json",
+        "w",
+        encoding="utf-8"
+    ) as f:
+        json.dump(cleaning_logs, f, indent=2, ensure_ascii=False)
 
 
 
