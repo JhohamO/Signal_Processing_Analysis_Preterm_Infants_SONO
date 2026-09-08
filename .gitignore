@@ -5,8 +5,10 @@ data/original_data/*
 data/results/*
 .idea/
 .venv/
+
+# Archivos específicos
 data/info_marcadores.xlsx
-data/aleatorizacion_hipotermia.xlsx
+data/aletorizacion_hipotermina.xlsx
 data/Problemas_con_marcadores.txt
 scripts/info_marcas_arreglar.xlsx
 
@@ -14,6 +16,7 @@ scripts/info_marcas_arreglar.xlsx
 !data/eeg_clean/.gitkeep
 !data/MNE/.gitkeep
 !data/original_data/.gitkeep
+!data/results/.gitkeep
 
 # Python
 __pycache__/
