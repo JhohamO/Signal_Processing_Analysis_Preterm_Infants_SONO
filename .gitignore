@@ -3,12 +3,13 @@ data/eeg_clean/*
 data/MNE/*
 data/original_data/*
 data/results/*
+figures/*
 .idea/
 .venv/
 
 # Archivos específicos
 data/info_marcadores.xlsx
-data/aletorizacion_hipotermina.xlsx
+data/aleatorizacion_hipotermia.xlsx
 data/Problemas_con_marcadores.txt
 scripts/info_marcas_arreglar.xlsx
 
@@ -17,6 +18,7 @@ scripts/info_marcas_arreglar.xlsx
 !data/MNE/.gitkeep
 !data/original_data/.gitkeep
 !data/results/.gitkeep
+!figures/.gitkeep
 
 # Python
 __pycache__/
