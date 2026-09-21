@@ -3,6 +3,9 @@ import joblib
 import matplotlib.pyplot as plt
 from pathlib import Path
 import pandas as pd
+import matplotlib
+
+matplotlib.use("TkAgg")
 
 """=============Constantes del código========================="""
 #Definir las rutas
@@ -162,6 +165,151 @@ def ajustar_info_plot(sujeto: str, par_sujeto:str, series_potencia_zscore: dict)
 
     return lineas_vert, matrices_series_bandas
 
+def extraer_media_desv_poblacional(minimos, series_potencia_zscore, aleatorizacion):
+    """
+    Crear 2 matrices (una de medias, otra de desviaciones) de la forma (n_ventanas, n_channels) donde cada item corresponde a la media
+    (o desviación) de de todos los sujetos en esa determinada ventana y en ese determinado canal para cada condición (MT y control)
+    :param minimos: Iterable con el tamaño mínimo de cada estpimulo en ventanas para ser tenido en cuenta
+    :param series_potencia_zscore: Diccionario de forma Sujeto:Estímulo:Banda:Matriz (n_ventanas, n_channels) con las potencias
+    en zscore value de cada ventana
+    :param aleatorizacion: DataFrame donde se define la condición de aleatorización
+    :return: Diccionario de la forma Condición:Banda:Media/Desv:Matriz (n_ventanas, n_channels)
+    """
+
+    #========Recorrer los sujetos para extraer información============
+    #Definir el índice del último sujeto a recorrer
+    n_max = int(sorted(series_potencia_zscore.keys())[-1][1:3])
+
+    # Crear un diccionario para guardar las matrices de información de cada sujeto en cada banda
+    series_completas = {}
+
+    # Series para los sujetos bajo MT y control
+    series_MT = {}
+    series_control = {}
+
+    # Recorrer los índices
+    for n in range(1, n_max + 1):
+
+        # Crear el número del sujeto
+        numero = "0" + str(n) if n < 10 else str(n)
+
+        # Crear los nombres de los archivos
+        sujeto = "P" + numero + "_MT1"
+        par_sujeto = "P" + numero + "_MT2"
+
+        # Si no se encuentran ambos en las series, saltar al siguiente sujeto
+        if sujeto not in series_potencia_zscore.keys() or par_sujeto not in series_potencia_zscore.keys():
+            continue
+
+        #Extraer el número de ventanas de cada estímulo para cada sujeto
+        lens_sujeto = []
+        lens_par_sujeto = []
+
+        for estimulo in series_potencia_zscore[sujeto]:
+            v_sujeto = next(iter(series_potencia_zscore[sujeto][estimulo].values())).shape[0]
+            v_par_sujeto = next(iter(series_potencia_zscore[par_sujeto][estimulo].values())).shape[0]
+            lens_sujeto.append(v_sujeto)
+            lens_par_sujeto.append(v_par_sujeto)
+
+        lens_sujeto = np.array(lens_sujeto)
+        lens_par_sujeto = np.array(lens_par_sujeto)
+
+        # Si el sujeto es más corto que los mínimos, se salta también
+        if not np.all(minimos <= lens_sujeto) or not np.all(minimos <= lens_par_sujeto):
+            continue
+
+        # Extraer la condición de aleatorización
+        condicion = aleatorizacion.iloc[int(sujeto[1:3]) - 1, 1]
+
+        # =======Extraer las matrices de deatos de cada sujeto en cada estímulo pero cortando hasta el límite=======
+        # Bandas de potencia con las que se cuenta
+        bandas = next(iter(series_potencia_zscore[sujeto].values()))
+
+        # Crear la estructura para el sujeto y su par en las series
+        series_completas[sujeto] = {
+            banda: [] for banda in bandas
+        }
+
+        series_completas[par_sujeto] = {
+            banda: [] for banda in bandas
+        }
+
+        # Llenar las listas recorriendo los estímulos y las bandas
+        for n_est, (estimulo, bandas) in enumerate(series_potencia_zscore[sujeto].items()):
+
+            for banda, matriz in bandas.items():
+                # Agregar la matriz cortada a cada lista anterior
+                series_completas[sujeto][banda].append(matriz[:minimos[n_est], :])
+
+                matriz_par = series_potencia_zscore[par_sujeto][estimulo][banda][:minimos[n_est], :]
+                series_completas[par_sujeto][banda].append(matriz_par)
+
+        # Llenar la correspondiente serie de cada MT o de control dependiendo de la condición de aleatorización
+        if condicion == 1:
+            series_MT[sujeto] = series_completas[sujeto]
+            series_control[par_sujeto] = series_completas[par_sujeto]
+
+        else:
+            series_MT[par_sujeto] = series_completas[par_sujeto]
+            series_control[sujeto] = series_completas[sujeto]
+
+    # Concatenar verticalmente las matrices de cada banda. i.e Unir las series de tiempo de los distintos estímulos
+    for sujeto, bandas in series_MT.items():
+        for banda, matrices in bandas.items():
+            series_MT[sujeto][banda] = np.vstack(matrices)
+
+    for sujeto, bandas in series_control.items():
+        for banda, matrices in bandas.items():
+            series_control[sujeto][banda] = np.vstack(matrices)
+
+    #========Apilar las matrices de cada sujeto usando un 3ra dimensión (n_ventanas, n_channels, n_sujetos)======
+
+    #La matriz de 3 dimensiones se calcula por banda independiente
+    apiladas_MT = {
+        banda: []
+        for banda in bandas
+    }
+
+    apiladas_control = {
+        banda: []
+        for banda in bandas
+    }
+
+    # Recorrer los sujetos MT y control
+    for sujeto, bandas in series_MT.items():
+        for banda, matriz in bandas.items():
+            apiladas_MT[banda].append(matriz)
+
+    for sujeto, bandas in series_control.items():
+        for banda, matriz in bandas.items():
+            apiladas_control[banda].append(matriz)
+
+    # Apilar la lista para quedar con un matriz de dimensiones (n_ventanas_total, n_channels_n_sujetos)
+    for banda in apiladas_MT:
+        apiladas_MT[banda] = np.stack(apiladas_MT[banda], axis=2)
+        apiladas_control[banda] = np.stack(apiladas_control[banda], axis=2)
+
+    # Crear la estructura para guardar la media y desviación de cada punto de la serie
+    series_promedio = {
+        "MT": {
+            banda: {"media": None, "std": None}
+            for banda in bandas
+        },
+        "Control": {
+            banda: {"media": None, "std": None}
+            for banda in bandas
+        }
+    }
+
+    # Recorrer las matrices apiladas para extraer la media y desviación de cada canal en cada punto
+    for banda in apiladas_MT:
+        series_promedio["MT"][banda]["media"] = np.nanmean(apiladas_MT[banda], axis=2)
+        series_promedio["MT"][banda]["std"] = np.nanstd(apiladas_MT[banda], axis=2)
+
+        series_promedio["Control"][banda]["media"] = np.nanmean(apiladas_control[banda], axis=2)
+        series_promedio["Control"][banda]["std"] = np.nanstd(apiladas_control[banda], axis=2)
+
+    return series_promedio
 
 def plot_banda(matriz_1,matriz_2,sujeto_1,sujeto_2,banda,canales, condicion
                ,ventanas_lineas=None, ventana_suavizado=None, guardar=False, carpeta_guardado=None):
@@ -327,17 +475,162 @@ def plot_banda(matriz_1,matriz_2,sujeto_1,sujeto_2,banda,canales, condicion
     plt.show()
     plt.close(fig)
 
+def plotear_promedio_grupal(series_promedio, finales_est, etiquetas, ventana_suavizado=None):
+    """
+    Plotea las línea de tiempo medias y banda de dispersión de cada banda de frecuencia
+    :param series_promedio: Diccionario de la forma Condición: Banda: Medida (media o desviación): Matriz (n_ventanas, n_canales)
+    :param finales_est: Valores en ventanas que corresponden al final de cada estímulo (sin contar el último)
+    etiquetas: Lista de etiquetas de cada zona del gráfico
+    ventana_suavizado: Tamaño de la ventana para suavizar las series de tiempo
+    :return:
+    """
+
+    #Ubicar los inicios de cada estímulo para ubicar posteriormenete el nombre de cada sección
+    inicios = [0] + list(finales_est)
+
+    # Definir el eje x del plot. Primero en ventanas
+    ventanas = np.arange(next(iter(series_promedio["MT"].values()))["media"].shape[0])
+
+    #Ahora convertido a minutos
+    minutos = ventanas * 1.5 / 60
+
+    # Recorrer las condiciones
+    for intervencion, bandas in series_promedio.items():
+
+        # Crear el gráfico para cada condición
+        fig, axes = plt.subplots(len(series_promedio[intervencion]), 1, figsize=(12, 12), sharex=True,
+                                 gridspec_kw= dict(hspace=0))
+
+        # Seleccionar la paleta de colores
+        cmap = plt.get_cmap("viridis")
+        colores = cmap(np.linspace(0.1, 0.9, len(NAME_CHANNELS)))
+
+        # Recorrer las bandas
+        for ax, banda in zip(axes, bandas.keys()):
+
+            # Extraer las matrices correspondientes para la banda
+            medias = series_promedio[intervencion][banda]["media"]
+            stds = series_promedio[intervencion][banda]["std"]
+
+            # Recorrer los canales para plotearlos
+            for n_chan, channel in enumerate(NAME_CHANNELS):
+                # Media y desviación del canal
+                media = medias[:, n_chan]
+                std = stds[:, n_chan]
+
+                if ventana_suavizado:
+                    media = (pd.Series(media).rolling(
+                        window=ventana_suavizado,
+                        center=True,
+                        min_periods=1
+                    ).mean().to_numpy())
+
+                    std = (pd.Series(std).rolling(
+                        window=ventana_suavizado,
+                        center=True,
+                        min_periods=1
+                    ).mean().to_numpy())
+
+                # Plotear la media
+                ax.plot(minutos, media, color=colores[n_chan], label=channel)
+
+                # Plotear la banda de dispersión
+                ax.fill_between(
+                    minutos,
+                    media - std,
+                    media + std,
+                    color=colores[n_chan],
+                    alpha=0.15
+                )
+
+            # Agregar las líneas verticales de división de los estímulos
+            for final in finales_est:
+                ax.axvline(
+                    x=final * 1.5 / 60,
+                    linestyle="--",
+                    linewidth=1
+                )
+
+            for i_eti, etiqueta in enumerate(etiquetas):
+                ax.text(
+                    (inicios[i_eti] + 2) * 1.5 / 60,
+                    0.95,
+                    etiqueta,
+                    transform=ax.get_xaxis_transform(),
+                    ha="left",
+                    va="top",
+                    fontsize=11
+                )
+            #Remover las lineas de separación de los subplots
+            # for spine in ['top', 'right', 'bottom', 'left']:
+            #     ax.spines[spine].set_visible(False)
+            # ax.yaxis.tick_right()
+            ax.set_ylabel(banda)
+
+        axes[-1].set_xlabel("Tiempo")
+
+        # Titular las gráficas
+        titulo = intervencion
+
+        # Arreglar el nombre de la intervención de músico terapia
+        if titulo == "MT":
+            titulo = "Music therapy"
+
+        # Agregar el título a la gráfica
+        fig.suptitle(titulo)
+
+        handles, labels = axes[0].get_legend_handles_labels()
+
+        fig.legend(
+            handles,
+            labels,
+            loc="lower right",
+            ncol=6
+        )
+
+        plt.tight_layout(rect=[0, 0.05, 1, 1])
+        plt.show()
+
 
 """============USAR LAS FUNCIONES=================="""
-
 #Extracción de la media y desviación de Baseline de cada sujeto en cada banda
 media_desviacion = media_desv_baseline(series_potencia)
 
 #Transformación z de las frecuencias teniendo en cuenta media y desviación de Baseline
 series_potencia_zscore = z_score_potencias(series_potencia, media_desviacion)
 
+
+"""Plots grupales"""
+
+#Etiquetas de las zonas a nombrar
+etiquetas = ["Baseline", "Nursing", "Intervention", "Post"]
+
+#Definir los mínimos por ventana
+#LB 4.9218 min, #Nursing 3.25 min, Intervention 9.31 min y Post 4.12 min
+minimos = [series_potencia_zscore["P01_MT1"]["Baseline"][next(iter(series_potencia_zscore["P01_MT1"]["Baseline"].keys()))].shape[0],
+           series_potencia_zscore["P12_MT1"]["Nursing"][next(iter(series_potencia_zscore["P12_MT1"]["Nursing"].keys()))].shape[0],
+           series_potencia_zscore["P11_MT2"]["Intervention"][next(iter(series_potencia_zscore["P11_MT2"]["Intervention"].keys()))].shape[0],
+           series_potencia_zscore["P13_MT1"]["Post"][next(iter(series_potencia_zscore["P13_MT1"]["Post"].keys()))].shape[0]]
+
+#El valor de nusring se puede variar para tener en cuenta más datos, pero menos sujetos
+
+#Los valores mínimos son también los valores para las líneas verticales del gráfico
+finales_est = np.cumsum(minimos)[:-1]
+
+#Extarer las series de tiempo de potencia media y la desviación de cada serie de tiempo
+series_promedio = extraer_media_desv_poblacional(minimos, series_potencia_zscore, aleatorizacion)
+
+plotear_promedio_grupal(series_promedio, finales_est, etiquetas, ventana_suavizado=5)
+
+# TODO: (Posibles)
+#  - Hacer np.clip sobre los datos originales a valores muy extremos (definir límite)
+#  - Hacer los gráficos promedios comparanndo cada banda en MT vs Control
+#  - Definir un eje y fijo para todos lo gráficos grupales
+
+"""Plots individuales"""
+
 #Recorrer de 1 a 15 para ir creando los gráficos
-for n in range(1, 15):
+for n in range(1, 16):
     numero = "0" + str(n) if n < 10 else str(n)
 
     #Crear los nombres de los archivos del sujeto
