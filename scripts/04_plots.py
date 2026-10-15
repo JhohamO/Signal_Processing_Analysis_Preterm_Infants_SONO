@@ -5,7 +5,7 @@ from pathlib import Path
 import pandas as pd
 import matplotlib
 
-matplotlib.use("TkAgg")
+# matplotlib.use("TkAgg")
 
 """=============Constantes del código========================="""
 #Definir las rutas
@@ -475,13 +475,15 @@ def plot_banda(matriz_1,matriz_2,sujeto_1,sujeto_2,banda,canales, condicion
     plt.show()
     plt.close(fig)
 
-def plotear_promedio_grupal(series_promedio, finales_est, etiquetas, ventana_suavizado=None):
+def plotear_promedio_grupal(series_promedio, finales_est, etiquetas, ventana_suavizado=None,
+                            carpeta_guardado=None):
     """
     Plotea las línea de tiempo medias y banda de dispersión de cada banda de frecuencia
     :param series_promedio: Diccionario de la forma Condición: Banda: Medida (media o desviación): Matriz (n_ventanas, n_canales)
     :param finales_est: Valores en ventanas que corresponden al final de cada estímulo (sin contar el último)
     etiquetas: Lista de etiquetas de cada zona del gráfico
     ventana_suavizado: Tamaño de la ventana para suavizar las series de tiempo
+    carpeta_guardado: Carpeta para guardar las imágenes
     :return:
     """
 
@@ -589,6 +591,18 @@ def plotear_promedio_grupal(series_promedio, finales_est, etiquetas, ventana_sua
         )
 
         plt.tight_layout(rect=[0, 0.05, 1, 1])
+
+        #Guardar
+        if carpeta_guardado:
+            carpeta = ROOT / Path(carpeta_guardado)
+            carpeta.mkdir(parents=True, exist_ok=True)
+            nombre_archivo = f"{titulo}.png"
+            ruta_salida = carpeta / nombre_archivo
+
+            fig.savefig(ruta_salida,
+                        dpi=300,
+                        bbox_inches="tight")
+
         plt.show()
 
 
@@ -620,7 +634,7 @@ finales_est = np.cumsum(minimos)[:-1]
 #Extarer las series de tiempo de potencia media y la desviación de cada serie de tiempo
 series_promedio = extraer_media_desv_poblacional(minimos, series_potencia_zscore, aleatorizacion)
 
-plotear_promedio_grupal(series_promedio, finales_est, etiquetas, ventana_suavizado=5)
+plotear_promedio_grupal(series_promedio, finales_est, etiquetas, ventana_suavizado=10, carpeta_guardado="figures/mean_eeg")
 
 # TODO: (Posibles)
 #  - Hacer np.clip sobre los datos originales a valores muy extremos (definir límite)
@@ -663,7 +677,7 @@ for n in range(1, 16):
             canales=NAME_CHANNELS,
             ventanas_lineas=lineas_vert,
             condicion=condicion,
-            ventana_suavizado=5,
+            ventana_suavizado=10,
             guardar=True,
             carpeta_guardado="figures/single_subjetcs"
         )

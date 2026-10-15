@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "deny": ["Read(./data/eeg_clean/**)",
+    "Read(./data/MNE/**)",
+    "Read(./data/originla_data/**)",
+    "Read(./figures/**)"]
+  }
+}

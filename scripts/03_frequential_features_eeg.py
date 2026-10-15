@@ -34,6 +34,21 @@ bandas = {
 #Cargar el df de tiempos
 df_tiempos = pd.read_excel(DATA_DIR / "info_marcadores.xlsx", index_col=0)
 
+
+def expandir_canales(vector, all_channels, good_channels):
+    """
+    Expande un vector con valores solo de los canales buenos a todos los canales, dejando NaN en los malos
+    :param vector: Array (n_good_channels,)
+    :param all_channels: Lista de todos los canales de EEG
+    :param good_channels: Lista de canales buenos
+    :return: Array (n_all_channels,)
+    """
+    indices_buenos = [i for i, ch in enumerate(all_channels) if ch in good_channels]
+    vector_completo = np.full(len(all_channels), np.nan)
+    vector_completo[indices_buenos] = vector
+
+    return vector_completo
+
 #Función para la extracción de las medidas de frecuencia con respecto a LB de cada estímulo
 def procesar_eeg_neonatos(filepath, dict_eventos, frecuencias, n_fft=512):
     """
@@ -42,7 +57,8 @@ def procesar_eeg_neonatos(filepath, dict_eventos, frecuencias, n_fft=512):
     :param dict_eventos: Diccionario de eventos
     :param n_fft:número de puntos para la fft.
     :param frecuencias: Tuplas con fmin y fmax de cada banda de interés
-    :return:
+    :return: - Diccionario banda: estímulo: supresión respecto a Baseline (dB)
+             - Diccionario banda: estímulo: potencia absoluta (dB re µV²/Hz), incluido Baseline
     """
 
     #Leer el archivo
@@ -85,7 +101,65 @@ def procesar_eeg_neonatos(filepath, dict_eventos, frecuencias, n_fft=512):
     for banda in potencias:
         pot_normalizadas[banda] = calcular_supresion(potencias[banda], "Baseline", all_channels, good_channels)
 
-    return pot_normalizadas
+    #Potencia absoluta en dB (V²/Hz -> µV²/Hz), con NaN en los canales malos
+    pot_absolutas = {
+        banda: {
+            estimulo: expandir_canales(10 * np.log10(vector * 1e12), all_channels, good_channels)
+            for estimulo, vector in potencias[banda].items()
+        }
+        for banda in potencias
+    }
+
+    return pot_normalizadas, pot_absolutas
+
+
+def indicadores_artefacto(filepath, tiempos_dp, nombres_estimulos=("Baseline", "Nursing", "Intervention", "Post")):
+    """
+    Indicadores de artefacto por estímulo: % de tiempo marcado como BAD y potencia de EMG y EOG.
+    EMG y EOG se expresan en dB respecto a Baseline (en Baseline queda la potencia absoluta en dB).
+    :param filepath: Ruta al archivo .fif limpio
+    :param tiempos_dp: Vector con inicio y final de cada estímulo en datapoints
+    :param nombres_estimulos: Nombres de los estímulos en el orden de tiempos_dp
+    :return: Diccionario Estimulo_Indicador: valor
+    """
+
+    raw = mne.io.read_raw_fif(filepath, preload=True)
+    sfreq = raw.info["sfreq"]
+
+    #Máscara de las muestras marcadas como BAD en la limpieza manual
+    muestras_bad = np.zeros(raw.n_times, dtype=bool)
+    for anotacion in raw.annotations:
+        if anotacion["description"].startswith("BAD"):
+            inicio = int((anotacion["onset"] - raw.first_time) * sfreq)
+            muestras_bad[inicio:inicio + int(anotacion["duration"] * sfreq)] = True
+
+    indicadores = {}
+
+    for i_est, estimulo in enumerate(nombres_estimulos):
+        inicio = int(tiempos_dp[2 * i_est])
+        final = min(int(tiempos_dp[2 * i_est + 1]), raw.n_times - 1)
+
+        indicadores[f"{estimulo}_BAD"] = muestras_bad[inicio:final].mean() * 100
+
+        #Espectro de EMG y EOG excluyendo los tramos BAD
+        segmento = raw.copy().crop(tmin=inicio / sfreq, tmax=final / sfreq)
+        psd_obj = segmento.compute_psd(method="welch", picks=["EMG", "ROC", "LOC"], fmin=0.5, fmax=40,
+                                       n_fft=512, reject_by_annotation=True)
+        psd, freqs = psd_obj.get_data(picks="all"), psd_obj.freqs
+
+        #EMG está filtrado a 40 Hz, por lo que la banda alta solo llega hasta ahí
+        indicadores[f"{estimulo}_EMG_alta"] = psd[0, (freqs >= 20) & (freqs <= 40)].mean()
+        indicadores[f"{estimulo}_EMG_total"] = psd[0].mean()
+        indicadores[f"{estimulo}_EOG_delta"] = psd[1:, (freqs >= 0.5) & (freqs <= 4)].mean()
+
+    #Pasar EMG y EOG a dB respecto a Baseline
+    for indicador in ["EMG_alta", "EMG_total", "EOG_delta"]:
+        baseline = indicadores[f"{nombres_estimulos[0]}_{indicador}"]
+        for estimulo in nombres_estimulos[1:]:
+            indicadores[f"{estimulo}_{indicador}"] = 10 * np.log10(indicadores[f"{estimulo}_{indicador}"] / baseline)
+        indicadores[f"{nombres_estimulos[0]}_{indicador}"] = 10 * np.log10(baseline * 1e12)
+
+    return indicadores
 
 
 def serie_potencias_segmentos(segmentos, n_channels, good_indices, bandas, sfreq=250,
@@ -231,11 +305,22 @@ canales = ["Fp1", "Fp2", "C3", "C4", "P3", "P4", "O1", "O2", "T7", "T8", "Cz"]
 #Crear los nombres de las columnas
 nombres_columnas = [proc + "_" + canal for proc in procedimientos for canal in canales]
 
+#Columnas de la potencia absoluta (incluye Baseline)
+estimulos_absolutos = ["Baseline"] + procedimientos
+nombres_columnas_abs = [est + "_" + canal for est in estimulos_absolutos for canal in canales]
+
 #Base de datos para guardar el vector por sujeto para cada banda
 base_datos = {
     banda: []
     for banda in bandas
 }
+base_datos_abs = {
+    banda: []
+    for banda in bandas
+}
+
+#Indicadores de artefacto por sujeto
+base_artefactos = {}
 
 #Archvivos sin información para hacer los cortes
 no_tiempos = []
@@ -246,7 +331,7 @@ nombres_sujetos = []
 #Recorrer los archivos
 for archivo in DATA_DIR_CLEAN.glob("*.fif"):
     try:
-        info_archivo = procesar_eeg_neonatos(archivo, DICT_EVENTOS, frecuencias=bandas)
+        info_archivo, info_absoluta = procesar_eeg_neonatos(archivo, DICT_EVENTOS, frecuencias=bandas)
 
     #El archivo no se encuentra en el excel de tiempos
     except KeyError:
@@ -260,6 +345,11 @@ for archivo in DATA_DIR_CLEAN.glob("*.fif"):
                                      info_archivo[banda]["Post"]))
             base_datos[banda].append(vector)
 
+            vector_abs = np.concatenate([info_absoluta[banda][est] for est in estimulos_absolutos])
+            base_datos_abs[banda].append(vector_abs)
+
+        base_artefactos[archivo.stem[:-10]] = indicadores_artefacto(archivo, df_tiempos.loc[archivo.stem[:-10], :].to_numpy())
+
 
 #Crear la carpeta de resultados
 DATA_DIR_RESULTS.mkdir(parents=True, exist_ok=True)
@@ -269,6 +359,13 @@ with pd.ExcelWriter(DATA_DIR_RESULTS / "supresion_potencias.xlsx") as writer:
     for banda, matriz in base_datos.items():
         df = pd.DataFrame(matriz, index=nombres_sujetos, columns=nombres_columnas)
         df.to_excel(writer, sheet_name=banda)
+
+with pd.ExcelWriter(DATA_DIR_RESULTS / "potencias_absolutas.xlsx") as writer:
+    for banda, matriz in base_datos_abs.items():
+        df = pd.DataFrame(matriz, index=nombres_sujetos, columns=nombres_columnas_abs)
+        df.to_excel(writer, sheet_name=banda)
+
+pd.DataFrame.from_dict(base_artefactos, orient="index").to_excel(DATA_DIR_RESULTS / "indicadores_artefacto.xlsx")
 
 
 

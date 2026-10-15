@@ -6,12 +6,16 @@ data/results/*
 figures/*
 .idea/
 .venv/
+.claude/
 
 # Archivos específicos
 data/info_marcadores.xlsx
 data/aleatorizacion_hipotermia.xlsx
 data/Problemas_con_marcadores.txt
 scripts/info_marcas_arreglar.xlsx
+CLAUDE.md
+MEMORY.md
+RESULTADOS.md
 
 # Mantener placeholders
 !data/eeg_clean/.gitkeep
